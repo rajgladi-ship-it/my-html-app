@@ -1,0 +1,11 @@
+{
+  "name": "ScanLog",
+  "short_name": "ScanLog",
+  "description": "ScanLog - Location and Container Barcode Scanner",
+  "start_url": "/my-html-app/",
+  "scope": "/my-html-app/",
+  "display": "standalone",
+  "background_color": "#12181D",
+  "theme_color": "#FFB020",
+  "orientation": "portrait"
+}
