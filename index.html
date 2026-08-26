@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>ScanLog — Location &amp; Container Scanner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#12181D;
+    --surface:#1C2530;
+    --surface-2:#232E3B;
+    --border:#2E3944;
+    --accent:#FFB020;
+    --accent-dim:#8a6a1f;
+    --laser:#FF3B30;
+    --success:#33D17A;
+    --text:#EAF0F5;
+    --muted:#8A97A3;
+    --font-ui: 'IBM Plex Sans', sans-serif;
+    --font-mono: 'IBM Plex Mono', monospace;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0; padding:0; height:100vh; height:100dvh; background:var(--bg); color:var(--text); font-family:var(--font-ui); overscroll-behavior:none; overflow:hidden;}
+  body{display:flex; flex-direction:column;}
+
+  header.topbar{
+    flex-shrink:0;
+    padding:10px 16px;
+    border-bottom:1px solid var(--border);
+    display:flex; align-items:center; justify-content:space-between;
+    background:linear-gradient(180deg, var(--surface), var(--bg));
+  }
+  .brand{display:flex; align-items:center; gap:9px;}
+  .brand .mark{
+    width:26px; height:26px; border:2px solid var(--accent); border-radius:6px;
+    display:flex; align-items:center; justify-content:center; color:var(--accent);
+    font-family:var(--font-mono); font-weight:700; font-size:13px; flex-shrink:0;
+  }
+  .brand h1{font-size:14.5px; margin:0; letter-spacing:0.02em; font-weight:600;}
+  .brand .sub{font-size:10px; color:var(--muted); margin-top:0; letter-spacing:0.03em;}
+  .count-pill{
+    font-family:var(--font-mono); font-size:11px; color:var(--accent);
+    border:1px solid var(--accent-dim); background:rgba(255,176,32,0.08);
+    padding:4px 9px; border-radius:20px; flex-shrink:0;
+  }
+
+  main{flex:1; min-height:0; padding:10px 14px; display:flex; flex-direction:column;}
+  .view{display:none; flex:1; min-height:0; flex-direction:column;}
+  .view.active{display:flex; animation:fadein .16s ease;}
+  @keyframes fadein{from{opacity:0;} to{opacity:1;}}
+
+  /* ---- Scan reticle field ---- */
+  .field-block{margin-bottom:8px; display:flex; flex-direction:column; flex:1; min-height:0; justify-content:center;}
+  .field-label{
+    display:flex; align-items:center; justify-content:space-between;
+    font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em;
+    margin-bottom:5px; font-weight:600; flex-shrink:0;
+  }
+  .field-label .prefix-tag{
+    font-family:var(--font-mono); color:var(--accent); background:rgba(255,176,32,0.1);
+    padding:2px 7px; border-radius:4px; font-size:11px; letter-spacing:0;
+  }
+  .reticle{
+    position:relative; border-radius:10px; background:var(--surface);
+    border:1px solid var(--border); padding:9px 12px; overflow:hidden;
+    transition:border-color .15s ease, box-shadow .15s ease;
+  }
+  .reticle::before, .reticle::after,
+  .reticle .cbl, .reticle .cbr{
+    content:''; position:absolute; width:14px; height:14px; pointer-events:none;
+  }
+  .reticle::before{top:5px; left:5px; border-top:2px solid var(--accent-dim); border-left:2px solid var(--accent-dim); border-radius:3px 0 0 0;}
+  .reticle::after{top:5px; right:5px; border-top:2px solid var(--accent-dim); border-right:2px solid var(--accent-dim); border-radius:0 3px 0 0;}
+  .reticle .cbl{bottom:5px; left:5px; border-bottom:2px solid var(--accent-dim); border-left:2px solid var(--accent-dim); border-radius:0 0 0 3px;}
+  .reticle .cbr{bottom:5px; right:5px; border-bottom:2px solid var(--accent-dim); border-right:2px solid var(--accent-dim); border-radius:0 0 3px 0;}
+  .reticle.armed{border-color:var(--accent); box-shadow:0 0 0 3px rgba(255,176,32,0.12);}
+  .reticle.armed::before, .reticle.armed::after, .reticle.armed .cbl, .reticle.armed .cbr{border-color:var(--accent);}
+  .reticle.ok{border-color:var(--success); box-shadow:0 0 0 3px rgba(51,209,122,0.14);}
+  .reticle.err{border-color:var(--laser); box-shadow:0 0 0 3px rgba(255,59,48,0.16);}
+  .laser-sweep{
+    position:absolute; left:8px; right:8px; height:2px; background:var(--laser);
+    box-shadow:0 0 8px 1px var(--laser); top:50%; opacity:0; pointer-events:none;
+  }
+  .reticle.armed .laser-sweep{animation:sweep 1.6s linear infinite;}
+  @keyframes sweep{
+    0%{top:14%; opacity:.9;} 50%{top:86%; opacity:.9;} 51%{opacity:0;} 100%{top:14%; opacity:0;}
+  }
+  .reticle input{
+    width:100%; background:transparent; border:none; outline:none; color:var(--text);
+    font-family:var(--font-mono); font-size:17px; font-weight:600; letter-spacing:0.03em;
+    padding:4px 2px; position:relative; z-index:1;
+  }
+  .reticle input::placeholder{color:#4b5560; font-weight:400;}
+  .field-msg{font-size:10.5px; margin-top:4px; min-height:13px; font-family:var(--font-mono);}
+  .field-msg.ok{color:var(--success);}
+  .field-msg.err{color:var(--laser);}
+  .field-msg.hint{color:var(--muted);}
+  .field-msg.dup{color:var(--accent);}
+
+  .scan-btn-row{display:flex; gap:6px; margin-top:5px; flex-shrink:0;}
+  .icon-btn{
+    flex:1; background:var(--surface-2); border:1px solid var(--border); color:var(--text);
+    padding:7px 6px; border-radius:8px; font-family:var(--font-ui); font-size:11.5px;
+    display:flex; align-items:center; justify-content:center; gap:5px; cursor:pointer;
+  }
+  .icon-btn:active{background:#2b3946;}
+
+  .add-btn{
+    width:100%; margin-top:6px; padding:15px; border-radius:10px; border:none;
+    background:var(--accent); color:#1a1204; font-weight:700; font-size:15px;
+    letter-spacing:0.02em; cursor:pointer; transition:opacity .15s;
+  }
+  .add-btn:disabled{opacity:0.35; cursor:not-allowed;}
+  .add-btn:active:not(:disabled){opacity:0.85;}
+  .auto-note{
+    text-align:center; font-size:10.5px; color:var(--muted); margin-top:8px;
+    padding:6px 10px; border:1px dashed var(--border); border-radius:8px; flex-shrink:0;
+  }
+
+  .clear-link{
+    display:block; text-align:center; margin-top:6px; color:var(--muted);
+    font-size:11.5px; background:none; border:none; width:100%; padding:5px; cursor:pointer; flex-shrink:0;
+  }
+
+  .toast{
+    position:fixed; left:50%; bottom:66px; transform:translateX(-50%) translateY(10px);
+    background:var(--success); color:#08210f; font-weight:700; font-size:12.5px;
+    padding:9px 16px; border-radius:30px; opacity:0; pointer-events:none; transition:all .22s ease;
+    font-family:var(--font-mono); white-space:nowrap; z-index:50; max-width:92vw; overflow:hidden; text-overflow:ellipsis;
+  }
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+  .toast.warn{background:var(--accent); color:#241a02;}
+
+  /* ---- Report ---- */
+  .search-row{display:flex; gap:8px; margin-bottom:8px; flex-shrink:0;}
+  .search-row input{
+    flex:1; background:var(--surface); border:1px solid var(--border); border-radius:8px;
+    padding:8px 12px; color:var(--text); font-family:var(--font-mono); font-size:12.5px; outline:none;
+  }
+  .search-scan-btn{
+    flex-shrink:0; width:38px; background:var(--surface-2); border:1px solid var(--border); border-radius:8px;
+    color:var(--accent); display:flex; align-items:center; justify-content:center; cursor:pointer;
+  }
+  .search-scan-btn:active{background:#2b3946;}
+  .search-scan-btn .icon{width:17px; height:17px;}
+  .report-actions{display:flex; gap:8px; margin-bottom:10px; flex-shrink:0;}
+
+  /* ---- Status filter chips ---- */
+  .filter-row{display:flex; gap:6px; margin-bottom:10px; flex-shrink:0;}
+  .filter-chip{
+    flex:1; background:var(--surface); border:1px solid var(--border); color:var(--muted);
+    padding:7px 4px; border-radius:20px; font-family:var(--font-ui); font-size:11px; font-weight:600;
+    display:flex; align-items:center; justify-content:center; gap:5px; cursor:pointer;
+  }
+  .filter-chip .dot{width:6px; height:6px; border-radius:50%; flex-shrink:0;}
+  .filter-chip[data-filter="all"] .dot{background:var(--muted);}
+  .filter-chip[data-filter="valid"] .dot{background:var(--success);}
+  .filter-chip[data-filter="duplicate"] .dot{background:var(--laser);}
+  .filter-chip.active{border-color:var(--accent); color:var(--text); background:rgba(255,176,32,0.08);}
+
+  /* ---- Status badges (report table) ---- */
+  .status-badge{
+    display:inline-block; font-size:9.5px; font-weight:700; padding:2px 7px; border-radius:20px;
+    letter-spacing:0.03em; white-space:nowrap;
+  }
+  .status-badge.valid{color:var(--success); border:1px solid var(--success); background:rgba(51,209,122,0.1);}
+  .status-badge.duplicate{color:var(--laser); border:1px solid var(--laser); background:rgba(255,59,48,0.1);}
+  .status-badge.dup-loc{color:#ff9f43; border:1px solid #ff9f43; background:rgba(255,159,67,0.12);}
+  .status-badge.dup-con{color:#c77dff; border:1px solid #c77dff; background:rgba(199,125,255,0.12);}
+  .status-stack{display:flex; flex-direction:column; gap:3px; align-items:flex-start;}
+
+  .table-scroll{flex:1; min-height:240px; overflow-y:auto; border-radius:10px;}
+  table.log{width:100%; border-collapse:collapse; font-size:12px;}
+  table.log thead th{
+    text-align:left; color:var(--muted); font-weight:600; text-transform:uppercase;
+    font-size:9.5px; letter-spacing:0.06em; padding:0 8px 6px; border-bottom:1px solid var(--border);
+    position:sticky; top:0; background:var(--bg);
+  }
+  table.log tbody td{
+    padding:8px 8px; border-bottom:1px solid var(--border); font-family:var(--font-mono);
+    color:var(--text); vertical-align:top;
+  }
+  table.log tbody tr:active{background:var(--surface-2);}
+  .td-loc{color:var(--accent);}
+  .td-time{color:var(--muted); font-size:10.5px; white-space:nowrap;}
+  tr.is-dup td{background:rgba(255,59,48,0.06);}
+  .empty-state{text-align:center; padding:30px 20px 10px; color:var(--muted);}
+  .empty-state p{font-size:13px; margin:4px 0 0;}
+
+  /* ---- Settings ---- */
+  #view-settings{overflow-y:auto;}
+  .set-group{background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:13px; margin-bottom:10px;}
+  .set-group h3{margin:0 0 4px; font-size:12.5px; color:var(--text);}
+  .set-group .desc{font-size:11px; color:var(--muted); margin:0 0 10px; line-height:1.45;}
+  .set-row{margin-bottom:10px;}
+  .set-row label{display:block; font-size:10.5px; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:5px;}
+  .set-row input{
+    width:100%; background:var(--surface-2); border:1px solid var(--border); border-radius:8px;
+    padding:9px 12px; color:var(--text); font-family:var(--font-mono); font-size:14px; outline:none;
+  }
+  .set-row input:focus{border-color:var(--accent);}
+  .save-btn{
+    width:100%; padding:10px; border-radius:8px; border:1px solid var(--accent);
+    background:transparent; color:var(--accent); font-weight:600; font-size:13px; cursor:pointer;
+  }
+  .save-btn:active{background:rgba(255,176,32,0.1);}
+  .danger-btn{
+    width:100%; padding:10px; border-radius:8px; border:1px solid var(--laser);
+    background:transparent; color:var(--laser); font-weight:600; font-size:13px; cursor:pointer;
+  }
+
+  /* ---- Camera modal ---- */
+  .cam-modal{
+    position:fixed; inset:0; background:rgba(0,0,0,0.92); z-index:100;
+    display:none; flex-direction:column; align-items:center; justify-content:center; padding:20px;
+  }
+  .cam-modal.show{display:flex;}
+  .cam-modal .cam-frame{
+    width:100%; max-width:320px; aspect-ratio:1/1; border-radius:14px; overflow:hidden;
+    border:2px solid var(--accent); position:relative; background:#000;
+  }
+  #camReader{width:100%; height:100%;}
+  .cam-modal .cam-label{color:var(--text); font-family:var(--font-mono); font-size:12.5px; margin-top:14px;}
+  .cam-close{
+    margin-top:16px; padding:9px 24px; border-radius:30px; border:1px solid var(--border);
+    background:var(--surface); color:var(--text); font-size:12.5px; cursor:pointer;
+  }
+
+  /* ---- Confirm modal ---- */
+  .confirm-modal{
+    position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:110;
+    display:none; align-items:center; justify-content:center; padding:24px;
+  }
+  .confirm-modal.show{display:flex;}
+  .confirm-card{
+    width:100%; max-width:320px; background:var(--surface); border:1px solid var(--border);
+    border-radius:14px; padding:20px 18px; text-align:center;
+  }
+  .confirm-card .c-icon{
+    width:42px; height:42px; margin:0 auto 10px; border-radius:50%; background:rgba(255,59,48,0.12);
+    border:1px solid var(--laser); color:var(--laser); display:flex; align-items:center; justify-content:center;
+  }
+  .confirm-card .c-icon svg{width:20px; height:20px;}
+  .confirm-card h3{margin:0 0 6px; font-size:14.5px; color:var(--text);}
+  .confirm-card p{margin:0 0 16px; font-size:12px; color:var(--muted); line-height:1.5;}
+  .confirm-actions{display:flex; gap:8px;}
+  .confirm-actions button{
+    flex:1; padding:10px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; font-family:var(--font-ui);
+  }
+  .confirm-btn-no{background:var(--surface-2); border:1px solid var(--border); color:var(--text);}
+  .confirm-btn-no:active{background:#2b3946;}
+  .confirm-btn-yes{background:var(--laser); border:1px solid var(--laser); color:#280604;}
+  .confirm-btn-yes:active{opacity:0.85;}
+
+  /* ---- Bottom tab bar ---- */
+  nav.tabbar{
+    flex-shrink:0; display:flex; background:var(--surface);
+    border-top:1px solid var(--border); padding:6px 10px calc(6px + env(safe-area-inset-bottom));
+  }
+  nav.tabbar button{
+    flex:1; background:none; border:none; color:var(--muted); font-family:var(--font-ui);
+    font-size:10.5px; padding:6px 4px 3px; display:flex; flex-direction:column; align-items:center; gap:3px;
+    cursor:pointer; border-radius:8px;
+  }
+  nav.tabbar button.active{color:var(--accent);}
+
+  h2.view-title{font-size:13.5px; margin:0 0 8px; color:var(--text); font-weight:600; letter-spacing:0.02em; flex-shrink:0;}
+
+  .icon{width:16px; height:16px; flex-shrink:0; vertical-align:-3px;}
+  .icon-btn .icon{width:14px; height:14px;}
+  nav.tabbar .icon{width:18px; height:18px;}
+  .field-label .icon{width:13px; height:13px; margin-right:4px; color:var(--muted); vertical-align:-2px;}
+
+  /* ---- Hero strip on Scan view ---- */
+  .scan-hero{
+    display:flex; align-items:center; gap:10px; background:var(--surface);
+    border:1px solid var(--border); border-radius:10px; padding:7px 12px; margin-bottom:8px; flex-shrink:0;
+  }
+  .scan-hero .hero-art{width:26px; height:26px; flex-shrink:0; position:relative;}
+  .scan-hero .hero-art svg{width:100%; height:100%; color:var(--accent);}
+  .scan-hero .hero-art .beam{
+    position:absolute; left:4px; right:4px; height:2px; background:var(--laser);
+    box-shadow:0 0 6px 1px var(--laser); top:50%; animation:sweep 1.8s linear infinite; opacity:.85;
+  }
+  .scan-hero .hero-text{min-width:0;}
+  .scan-hero .hero-text h3{margin:0; font-size:11.5px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .scan-hero .hero-text p{margin:0; font-size:10px; color:var(--muted); line-height:1.3; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+
+  /* ---- Empty state illustration ---- */
+  .empty-art{width:60px; height:60px; margin:0 auto 8px; color:var(--border);}
+  .empty-art svg{width:100%; height:100%;}
+</style>
+</head>
+<body>
+
+<svg style="display:none">
+  <symbol id="ic-tag" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M11.5 3.5H5A1.5 1.5 0 0 0 3.5 5v6.5a1.5 1.5 0 0 0 .44 1.06l9.5 9.5a1.5 1.5 0 0 0 2.12 0l6.5-6.5a1.5 1.5 0 0 0 0-2.12l-9.5-9.5A1.5 1.5 0 0 0 11.5 3.5Z"/>
+    <circle cx="8" cy="8" r="1.6" fill="currentColor" stroke="none"/>
+  </symbol>
+  <symbol id="ic-pin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 21.5s7-6.7 7-12.4A7 7 0 0 0 5 9.1c0 5.7 7 12.4 7 12.4Z"/>
+    <circle cx="12" cy="9" r="2.5"/>
+  </symbol>
+  <symbol id="ic-box" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3.5 7.5 12 3l8.5 4.5v9L12 21l-8.5-4.5v-9Z"/>
+    <path d="M3.5 7.5 12 12l8.5-4.5M12 12v9"/>
+  </symbol>
+  <symbol id="ic-camera" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2l1.2-2h6.6l1.2 2h2A1.5 1.5 0 0 1 20 8.5v9A1.5 1.5 0 0 1 18.5 19h-13A1.5 1.5 0 0 1 4 17.5v-9Z"/>
+    <circle cx="12" cy="12.5" r="3.4"/>
+  </symbol>
+  <symbol id="ic-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+    <path d="M6 6l12 12M18 6L6 18"/>
+  </symbol>
+  <symbol id="ic-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 3.5v11.5M7.5 11l4.5 4.5L16.5 11"/>
+    <path d="M4.5 17v2A1.5 1.5 0 0 0 6 20.5h12A1.5 1.5 0 0 0 19.5 19v-2"/>
+  </symbol>
+  <symbol id="ic-printer" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M6.5 9V4h11v5"/>
+    <rect x="4" y="9" width="16" height="7" rx="1"/>
+    <path d="M6.5 14h11v6.5h-11z"/>
+  </symbol>
+  <symbol id="ic-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="3"/>
+    <path d="M19.4 13.5a7.4 7.4 0 0 0 0-3l1.9-1.5-2-3.4-2.3.6a7.5 7.5 0 0 0-2.6-1.5L14 2.5h-4l-.4 2.2a7.5 7.5 0 0 0-2.6 1.5l-2.3-.6-2 3.4L4.6 10.5a7.4 7.4 0 0 0 0 3L2.7 15l2 3.4 2.3-.6a7.5 7.5 0 0 0 2.6 1.5l.4 2.2h4l.4-2.2a7.5 7.5 0 0 0 2.6-1.5l2.3.6 2-3.4-1.9-1.5Z"/>
+  </symbol>
+  <symbol id="ic-scan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3.5 8V5.5A2 2 0 0 1 5.5 3.5H8M16 3.5h2.5a2 2 0 0 1 2 2V8M20.5 16v2.5a2 2 0 0 1-2 2H16M8 20.5H5.5a2 2 0 0 1-2-2V16"/>
+    <path d="M3.5 12h17"/>
+  </symbol>
+  <symbol id="ic-list" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8 6h12M8 12h12M8 18h12"/>
+    <circle cx="4" cy="6" r="1" fill="currentColor" stroke="none"/>
+    <circle cx="4" cy="12" r="1" fill="currentColor" stroke="none"/>
+    <circle cx="4" cy="18" r="1" fill="currentColor" stroke="none"/>
+  </symbol>
+</svg>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="mark"><svg class="icon" style="width:16px;height:16px;"><use href="#ic-tag"/></svg></div>
+    <div>
+      <h1>ScanLog</h1>
+      <div class="sub">Location &amp; Container Capture</div>
+    </div>
+  </div>
+  <div class="count-pill" id="headerCount">0 records</div>
+</header>
+
+<main>
+  <!-- SCAN VIEW -->
+  <section class="view active" id="view-scan">
+    <div class="scan-hero">
+      <div class="hero-art">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3.5 8V5.5A2 2 0 0 1 5.5 3.5H8M16 3.5h2.5a2 2 0 0 1 2 2V8M20.5 16v2.5a2 2 0 0 1-2 2H16M8 20.5H5.5a2 2 0 0 1-2-2V16"/>
+          <path d="M7 8.5v7M10 8.5v7M12.5 8.5v7M15 8.5v7M17.5 8.5v7"/>
+        </svg>
+        <div class="beam"></div>
+      </div>
+      <div class="hero-text">
+        <h3>Zebra MC3300 ready</h3>
+        <p>RFID / QR into Location → auto-Enter → Container</p>
+      </div>
+    </div>
+
+    <div class="field-block">
+      <div class="field-label">
+        <span><svg class="icon"><use href="#ic-pin"/></svg>Location</span>
+        <span class="prefix-tag" id="locPrefixTag">starts 1122</span>
+      </div>
+      <div class="reticle" id="locReticle">
+        <div class="cbl"></div><div class="cbr"></div>
+        <div class="laser-sweep"></div>
+        <input type="text" id="locInput" placeholder="Scan or type location code" autocomplete="off" inputmode="text">
+      </div>
+      <div class="field-msg hint" id="locMsg">Waiting for scan…</div>
+      <div class="scan-btn-row">
+        <button class="icon-btn" onclick="openCamera('loc')"><svg class="icon"><use href="#ic-camera"/></svg>Camera scan</button>
+        <button class="icon-btn" onclick="clearField('loc')"><svg class="icon"><use href="#ic-x"/></svg>Clear</button>
+      </div>
+    </div>
+
+    <div class="field-block">
+      <div class="field-label">
+        <span><svg class="icon"><use href="#ic-box"/></svg>Container</span>
+        <span class="prefix-tag" id="conPrefixTag">starts 2233</span>
+      </div>
+      <div class="reticle" id="conReticle">
+        <div class="cbl"></div><div class="cbr"></div>
+        <div class="laser-sweep"></div>
+        <input type="text" id="conInput" placeholder="Scan or type container code" autocomplete="off" inputmode="text">
+      </div>
+      <div class="field-msg hint" id="conMsg">Waiting for scan…</div>
+      <div class="scan-btn-row">
+        <button class="icon-btn" onclick="openCamera('con')"><svg class="icon"><use href="#ic-camera"/></svg>Camera scan</button>
+        <button class="icon-btn" onclick="clearField('con')"><svg class="icon"><use href="#ic-x"/></svg>Clear</button>
+      </div>
+    </div>
+
+    <div class="auto-note">Records save automatically the moment both fields are valid.</div>
+    <button class="clear-link" onclick="clearField('loc');clearField('con');document.getElementById('locInput').focus();">Clear both fields</button>
+  </section>
+
+  <!-- REPORT VIEW -->
+  <section class="view" id="view-report">
+    <h2 class="view-title">Report</h2>
+    <div class="search-row">
+      <input type="text" id="searchBox" placeholder="Scan or type to filter location / container…" oninput="renderTable()" onkeydown="if(event.key==='Enter'){event.preventDefault(); renderTable();}">
+      <button class="search-scan-btn" onclick="openCamera('search')" title="Scan to filter"><svg class="icon"><use href="#ic-camera"/></svg></button>
+    </div>
+    <div class="filter-row">
+      <button class="filter-chip active" data-filter="all" onclick="setStatusFilter('all')"><span class="dot"></span>All</button>
+      <button class="filter-chip" data-filter="valid" onclick="setStatusFilter('valid')"><span class="dot"></span>Valid</button>
+      <button class="filter-chip" data-filter="duplicate" onclick="setStatusFilter('duplicate')"><span class="dot"></span>Duplicate</button>
+    </div>
+    <div class="report-actions">
+      <button class="icon-btn" onclick="exportCSV()"><svg class="icon"><use href="#ic-download"/></svg>Export CSV</button>
+      <button class="icon-btn" onclick="window.print()"><svg class="icon"><use href="#ic-printer"/></svg>Print</button>
+    </div>
+    <div id="tableWrap" class="table-scroll"></div>
+  </section>
+
+  <!-- SETTINGS VIEW -->
+  <section class="view" id="view-settings">
+    <h2 class="view-title">Settings</h2>
+    <div class="set-group">
+      <h3>Scan prefixes</h3>
+      <p class="desc">Each scanned code is checked against these starting digits before it's accepted into that field. Change them any time.</p>
+      <div class="set-row">
+        <label>Location code starts with</label>
+        <input type="text" id="setLocPrefix" inputmode="numeric">
+      </div>
+      <div class="set-row">
+        <label>Container code starts with</label>
+        <input type="text" id="setConPrefix" inputmode="numeric">
+      </div>
+      <button class="save-btn" onclick="saveSettings()">Save Settings</button>
+    </div>
+    <div class="set-group">
+      <h3>Data</h3>
+      <p class="desc">All records are stored on this device only.</p>
+      <button class="danger-btn" onclick="clearAllRecords()">Clear All Records</button>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<div class="cam-modal" id="camModal">
+  <div class="cam-frame"><div id="camReader"></div></div>
+  <div class="cam-label" id="camLabel">Point camera at barcode…</div>
+  <button class="cam-close" onclick="closeCamera()">Cancel</button>
+</div>
+
+<div class="confirm-modal" id="confirmModal">
+  <div class="confirm-card">
+    <div class="c-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4.5M12 17h.01"/><path d="M10.3 3.9 2.6 17.5a1.5 1.5 0 0 0 1.3 2.3h16.2a1.5 1.5 0 0 0 1.3-2.3L13.7 3.9a1.5 1.5 0 0 0-2.6 0Z"/></svg></div>
+    <h3>Clear all records?</h3>
+    <p id="confirmMsg">This will permanently delete all records. This cannot be undone.</p>
+    <div class="confirm-actions">
+      <button class="confirm-btn-no" onclick="closeConfirmModal()">No</button>
+      <button class="confirm-btn-yes" onclick="confirmClearRecords()">Yes, clear</button>
+    </div>
+  </div>
+</div>
+
+<nav class="tabbar">
+  <button class="active" data-view="scan" onclick="switchView('scan')"><svg class="icon"><use href="#ic-scan"/></svg>Scan</button>
+  <button data-view="report" onclick="switchView('report')"><svg class="icon"><use href="#ic-list"/></svg>Report</button>
+  <button data-view="settings" onclick="switchView('settings')"><svg class="icon"><use href="#ic-gear"/></svg>Settings</button>
+</nav>
+
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+  // ---------- State ----------
+  let settings = JSON.parse(localStorage.getItem('scanlog_settings') || 'null') || { locPrefix:'1122', conPrefix:'2233' };
+  let records = JSON.parse(localStorage.getItem('scanlog_records') || '[]');
+  let fieldState = { loc:{value:'', valid:false}, con:{value:'', valid:false} };
+  let errorTimers = { loc:null, con:null };
+  let html5QrCode = null;
+  let camTarget = null;
+  let statusFilter = 'all';
+  const ERROR_DISPLAY_MS = 2000;
+
+  // ---------- Init ----------
+  function init(){
+    document.getElementById('setLocPrefix').value = settings.locPrefix;
+    document.getElementById('setConPrefix').value = settings.conPrefix;
+    document.getElementById('locPrefixTag').textContent = 'starts ' + settings.locPrefix;
+    document.getElementById('conPrefixTag').textContent = 'starts ' + settings.conPrefix;
+    updateCounts();
+    renderTable();
+    bindInput('loc');
+    bindInput('con');
+    document.getElementById('locInput').focus();
+  }
+
+  function bindInput(kind){
+    const input = document.getElementById(kind + 'Input');
+    input.addEventListener('focus', () => {
+      document.getElementById(kind + 'Reticle').classList.add('armed');
+    });
+    input.addEventListener('blur', () => {
+      document.getElementById(kind + 'Reticle').classList.remove('armed');
+    });
+    input.addEventListener('keydown', (e) => {
+      if(e.key === 'Enter'){
+        e.preventDefault();
+        submitField(kind, input.value);
+      }
+    });
+  }
+
+  function submitField(kind, raw){
+    const val = (raw || '').trim();
+    if(!val) return;
+    const prefix = kind === 'loc' ? settings.locPrefix : settings.conPrefix;
+    const reticle = document.getElementById(kind + 'Reticle');
+    const msg = document.getElementById(kind + 'Msg');
+    const input = document.getElementById(kind + 'Input');
+
+    clearTimeout(errorTimers[kind]);
+
+    if(val.startsWith(prefix)){
+      fieldState[kind] = { value: val, valid: true };
+      input.value = val;
+      reticle.classList.remove('err'); reticle.classList.add('ok');
+      msg.textContent = '✓ Accepted';
+      msg.className = 'field-msg ok';
+      if(navigator.vibrate) navigator.vibrate(40);
+
+      // Location accepted -> jump straight to Container for the next scan
+      if(kind === 'loc' && !fieldState.con.valid){
+        document.getElementById('conInput').focus();
+      }
+
+      // Both fields valid -> save immediately, no manual step
+      if(fieldState.loc.valid && fieldState.con.valid){
+        setTimeout(addRecord, 120); // brief pause so the ✓ state is visible before reset
+      }
+    } else {
+      // Wrong prefix or unrelated data scanned into this field
+      fieldState[kind] = { value:'', valid:false };
+      input.value = val;
+      reticle.classList.remove('ok'); reticle.classList.add('err');
+      msg.textContent = '✕ Wrong data — expected a code starting with "' + prefix + '"';
+      msg.className = 'field-msg err';
+      if(navigator.vibrate) navigator.vibrate([30,40,30]);
+
+      // Auto-clear the error after 2 seconds so the same field is ready to rescan
+      errorTimers[kind] = setTimeout(() => {
+        resetFieldVisual(kind);
+        input.focus();
+      }, ERROR_DISPLAY_MS);
+    }
+  }
+
+  function resetFieldVisual(kind){
+    const input = document.getElementById(kind + 'Input');
+    const reticle = document.getElementById(kind + 'Reticle');
+    const msg = document.getElementById(kind + 'Msg');
+    input.value = '';
+    reticle.classList.remove('ok','err');
+    msg.textContent = 'Waiting for scan…';
+    msg.className = 'field-msg hint';
+  }
+
+  function clearField(kind){
+    clearTimeout(errorTimers[kind]);
+    fieldState[kind] = { value:'', valid:false };
+    resetFieldVisual(kind);
+  }
+
+  function addRecord(){
+    if(!(fieldState.loc.valid && fieldState.con.valid)) return;
+    const locUsed = records.some(r => r.location === fieldState.loc.value);
+    const conUsed = records.some(r => r.container === fieldState.con.value);
+    const isDuplicate = locUsed || conUsed;
+    const rec = {
+      id: Date.now(),
+      ts: new Date().toISOString(),
+      location: fieldState.loc.value,
+      container: fieldState.con.value,
+      duplicate: isDuplicate,
+      locDup: locUsed,
+      conDup: conUsed
+    };
+    records.unshift(rec);
+    localStorage.setItem('scanlog_records', JSON.stringify(records));
+    if(isDuplicate){
+      let reason;
+      if(locUsed && conUsed) reason = 'Location ' + rec.location + ' and Container ' + rec.container + ' already used';
+      else if(locUsed) reason = 'Location ' + rec.location + ' already used';
+      else reason = 'Container ' + rec.container + ' already used';
+      showToast('⚠ Duplicate — ' + reason, true);
+      if(navigator.vibrate) navigator.vibrate([25,60,25,60,25]);
+    } else {
+      showToast('✓ Saved — Loc ' + rec.location + ' / Con ' + rec.container);
+    }
+    clearField('loc');
+    clearField('con');
+    document.getElementById('locInput').focus();
+    updateCounts();
+    renderTable();
+  }
+
+  function showToast(text, warn){
+    const t = document.getElementById('toast');
+    t.textContent = text;
+    t.classList.toggle('warn', !!warn);
+    t.classList.add('show');
+    setTimeout(()=> t.classList.remove('show'), warn ? 2400 : 1400);
+  }
+
+  // ---------- Report ----------
+  function updateCounts(){
+    document.getElementById('headerCount').textContent = records.length + ' record' + (records.length===1?'':'s');
+  }
+
+  function fmtTime(iso){
+    const d = new Date(iso);
+    return d.toLocaleDateString(undefined,{month:'short',day:'2-digit'}) + ' ' + d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
+  }
+
+  function setStatusFilter(f){
+    statusFilter = f;
+    document.querySelectorAll('.filter-chip').forEach(b => b.classList.toggle('active', b.dataset.filter === f));
+    renderTable();
+  }
+
+  function statusBadgeHtml(r){
+    if(!r.duplicate) return '<span class="status-badge valid">VALID</span>';
+    // Older records saved before this update won't have locDup/conDup set.
+    if(r.locDup === undefined && r.conDup === undefined){
+      return '<span class="status-badge duplicate">DUPLICATE</span>';
+    }
+    const badges = [];
+    if(r.locDup) badges.push('<span class="status-badge dup-loc">LOC.DUPLICATE</span>');
+    if(r.conDup) badges.push('<span class="status-badge dup-con">CON.DUPLICATE</span>');
+    return `<div class="status-stack">${badges.join('')}</div>`;
+  }
+
+  function renderTable(){
+    const wrap = document.getElementById('tableWrap');
+    const q = (document.getElementById('searchBox').value || '').toLowerCase();
+    let filtered = records.filter(r => !q || r.location.toLowerCase().includes(q) || r.container.toLowerCase().includes(q));
+    if(statusFilter === 'valid') filtered = filtered.filter(r => !r.duplicate);
+    if(statusFilter === 'duplicate') filtered = filtered.filter(r => r.duplicate);
+
+    if(filtered.length === 0){
+      let msgText = 'No records match your filters.';
+      if(records.length === 0) msgText = 'No records yet. Scan a location and container to get started.';
+      wrap.innerHTML = `<div class="empty-state">
+        <div class="empty-art">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3.5 8.5 12 4l8.5 4.5v8L12 21l-8.5-4.5v-8Z"/>
+            <path d="M3.5 8.5 12 13l8.5-4.5M12 13v8"/>
+            <path d="M8 6.2 16 10.7" stroke-dasharray="1.6 1.8"/>
+          </svg>
+        </div>
+        <p>${msgText}</p>
+      </div>`;
+      return;
+    }
+    let rows = filtered.map(r => `
+      <tr class="${r.duplicate ? 'is-dup' : ''}">
+        <td class="td-time">${fmtTime(r.ts)}</td>
+        <td class="td-loc">${escapeHtml(r.location)}</td>
+        <td>${escapeHtml(r.container)}</td>
+        <td>${statusBadgeHtml(r)}</td>
+      </tr>`).join('');
+    wrap.innerHTML = `<table class="log"><thead><tr><th>Time</th><th>Location</th><th>Container</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+
+  function escapeHtml(s){
+    return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function clearAllRecords(){
+    if(records.length === 0){ showToast('No records to clear'); return; }
+    document.getElementById('confirmMsg').textContent =
+      'Delete all ' + records.length + ' record' + (records.length===1?'':'s') + '? This cannot be undone.';
+    document.getElementById('confirmModal').classList.add('show');
+  }
+
+  function closeConfirmModal(){
+    document.getElementById('confirmModal').classList.remove('show');
+  }
+
+  function confirmClearRecords(){
+    records = [];
+    localStorage.setItem('scanlog_records', JSON.stringify(records));
+    updateCounts();
+    renderTable();
+    closeConfirmModal();
+    showToast('All records cleared');
+  }
+
+  function statusCsvText(r){
+    if(!r.duplicate) return 'Valid';
+    if(r.locDup === undefined && r.conDup === undefined) return 'Duplicate';
+    const parts = [];
+    if(r.locDup) parts.push('Loc.Duplicate');
+    if(r.conDup) parts.push('Con.Duplicate');
+    return parts.join(' + ');
+  }
+
+  function exportCSV(){
+    if(records.length === 0){ showToast('No records to export'); return; }
+    let csv = 'Timestamp,Location,Container,Status\n';
+    records.forEach(r => {
+      csv += `"${r.ts}","${r.location}","${r.container}","${statusCsvText(r)}"\n`;
+    });
+    const blob = new Blob([csv], {type:'text/csv'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'scanlog_report_' + new Date().toISOString().slice(0,10) + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  // ---------- Settings ----------
+  function saveSettings(){
+    const lp = document.getElementById('setLocPrefix').value.trim();
+    const cp = document.getElementById('setConPrefix').value.trim();
+    if(!lp || !cp){ showToast('Both prefixes are required'); return; }
+    settings = { locPrefix: lp, conPrefix: cp };
+    localStorage.setItem('scanlog_settings', JSON.stringify(settings));
+    document.getElementById('locPrefixTag').textContent = 'starts ' + lp;
+    document.getElementById('conPrefixTag').textContent = 'starts ' + cp;
+    clearField('loc'); clearField('con');
+    showToast('Settings saved');
+    switchView('scan');
+  }
+
+  // ---------- View switching ----------
+  function switchView(name){
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    document.getElementById('view-' + name).classList.add('active');
+    document.querySelectorAll('nav.tabbar button').forEach(b => b.classList.toggle('active', b.dataset.view === name));
+    if(name === 'report'){ updateCounts(); renderTable(); }
+    if(name === 'scan'){ document.getElementById('locInput').focus(); }
+  }
+
+  // ---------- Camera scan ----------
+  function openCamera(kind){
+    camTarget = kind;
+    document.getElementById('camModal').classList.add('show');
+    const labels = { loc: 'location', con: 'container', search: 'location or container' };
+    document.getElementById('camLabel').textContent = 'Point camera at ' + labels[kind] + ' barcode…';
+    html5QrCode = new Html5Qrcode('camReader');
+    html5QrCode.start(
+      { facingMode: 'environment' },
+      { fps: 10, qrbox: { width: 220, height: 220 } },
+      (decodedText) => {
+        if(camTarget === 'search'){
+          document.getElementById('searchBox').value = decodedText;
+          renderTable();
+        } else {
+          submitField(camTarget, decodedText);
+        }
+        closeCamera();
+      },
+      () => {}
+    ).catch(() => {
+      document.getElementById('camLabel').textContent = 'Camera unavailable. Check permissions, or type the code manually.';
+    });
+  }
+
+  function closeCamera(){
+    document.getElementById('camModal').classList.remove('show');
+    if(html5QrCode){
+      html5QrCode.stop().catch(()=>{}).finally(()=>{ html5QrCode.clear(); html5QrCode = null; });
+    }
+  }
+
+  init();
+</script>
+</body>
+</html>
